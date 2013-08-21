@@ -1,0 +1,4 @@
+mods.cache
+vqcache/vq*
+logs/*.log
+xml/*.xml
