@@ -4,7 +4,7 @@
  * @description Main Object used
  */
 abstract class VQMod {
-	public static $_vqversion = '2.4.1';
+	public static $_vqversion = '3.0.0';
 	
 	private static $_modFileList = array();
 	private static $_mods = array();
