@@ -4,7 +4,7 @@
  * @description Main Object used
  */
 abstract class VQMod {
-	public static $_vqversion = '2.4.1';
+	private static $_vqversion = '3.0.0';
 	
 	private static $_modFileList = array();
 	private static $_mods = array();
@@ -180,6 +180,16 @@ abstract class VQMod {
 				die('VQMod::dirCheck - CANNOT CREATE "' . $path . '" DIRECTORY');
 			}
 		}
+	}
+
+	/**
+	 * VQMod::getVersion()
+	 *
+	 * @return string
+	 * @description Returns current version number
+	 */
+	public static function getVersion() {
+		return self::$_vqversion;
 	}
 
 	/**
