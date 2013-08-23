@@ -207,7 +207,7 @@ abstract class VQMod {
 	 *
 	 * @param bool $enabled
 	 * @return string
-	 * @description Returns current Developer Mode
+	 * @description Sets Developer Mode
 	 */
 	public static function setDevMode($enabled) {
 		self::$_devMode = (bool) $enabled;
@@ -660,12 +660,8 @@ class VQModObject {
 										}
 									}
 								}
-
-								if($mod['search']->regex == 'true') {
-									$tmp[$lineNum] = preg_replace($mod['search']->getContent(), $mod['add']->getContent(), $line);
-								} else {
-									$tmp[$lineNum] = str_replace($mod['search']->getContent(), $mod['add']->getContent(), $line);
-								}
+								
+								$tmp[$lineNum] = $this->_textReplace($mod['search']->getContent(), $mod['add']->getContent(), $line, $mod['search']->regex);
 								break;
 							}
 						}
@@ -695,6 +691,24 @@ class VQModObject {
 		VQMod::$fileModding = false;
 
 		$data = $tmp;
+	}
+
+	/**
+	 * VQModObject::_textReplace()
+	 *
+	 * @param string $search text to find
+	 * @param string $add text to add
+	 * @param string $content text to perform modification to
+	 * @param bool $regex regex replace
+	 * @return string
+	 * @description 
+	 */
+	private function _textReplace($search, $replace, $content, $regex = false){
+		if($regex) {
+			return preg_replace($search, $replace, $content);
+		} else {
+			return str_replace($search, $replace, $content);
+		}
 	}
 
 	/**
