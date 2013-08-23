@@ -404,6 +404,346 @@ abstract class VQMod {
 }
 
 /**
+ * VQModEngine
+ * @description Main processing engine
+ */
+abstract class VQModEngine {
+
+
+	/**
+	 * VQModEngine::textReplace()
+	 *
+	 * @param string $search text to find
+	 * @param string $add text to add
+	 * @param string $content text to perform modification to
+	 * @param bool $regex regex replace
+	 * @return string
+	 * @description Text replacement based on regex/non regex content
+	 */
+	public static function textReplace($search, $replace, $content, $regex){
+		if($regex) {
+			return preg_replace($search, $replace, $content);
+		} else {
+			return str_replace($search, $replace, $content);
+		}
+	}
+
+
+	/**
+	 * VQModEngine::getLine()
+	 *
+	 * @param array $lines Lines to search for match
+	 * @param string $search text to find
+	 * @param int $start line index to start from
+	 * @param bool $regex regex replace
+	 * @return int (bool false on failure)
+	 * @description Gets the next line that matches a search
+	 */
+	public static function getLine(&$lines, $search, $start, $regex){
+		
+	}
+
+
+	/**
+	 * VQModEngine::getMatch()
+	 *
+	 * @param string $line Lines to attempt match on
+	 * @param string $search text to find
+	 * @param bool $regex regex replace
+	 * @return int 1 = Success, 0 = No Match, FALSE = regex error
+	 * @description Tries to match $search on $line, returning outcome of success/failure
+	 */
+	public static function getMatch($line, $search, $regex){
+		if($regex) {
+			return @preg_match($search, $line);
+		} else {
+			return strpos($line, $search) === FALSE ? 0 : 1;
+		}
+	}
+}
+
+/**
+ * VQModObject
+ * @description Object for the <modification> that orchestrates each applied modification
+ */
+class VQModObject {
+	public $modFile = '';
+	public $id = '';
+	public $version = '';
+	public $vqmver = '';
+	public $author = '';
+	public $mods = array();
+
+	private $_skip = false;
+
+	/**
+	 * VQModObject::__construct()
+	 *
+	 * @param DOMNode $node <modification> node
+	 * @param string $modFile File modification is from
+	 * @return null
+	 * @description Loads modification meta information
+	 */
+	public function __construct(DOMNode $node, $modFile) {
+		if($node->hasChildNodes()) {
+			foreach($node->childNodes as $child) {
+				$name = (string) $child->nodeName;
+				if(isset($this->$name)) {
+					$this->$name = (string) $child->nodeValue;
+				}
+			}
+		}
+
+		$this->modFile = $modFile;
+		$this->_parseMods($node);
+	}
+
+	/**
+	 * VQModObject::skip()
+	 *
+	 * @return bool
+	 * @description Returns the skip status of a modification
+	 */
+	public function skip() {
+		return $this->_skip;
+	}
+
+	/**
+	 * VQModObject::applyMod()
+	 *
+	 * @param array $mods Array of search add nodes
+	 * @param string $data File contents to be altered
+	 * @return null
+	 * @description Applies all modifications to the text data
+	 */
+	public function applyMod($mods, &$data) {
+		if($this->_skip) return;
+		$tmp = $data;
+
+		foreach($mods as $mod) {
+			VQMod::$fileModding = $mod['fileToMod'] . '(' . $mod['opIndex'] . ')';
+			if(!empty($mod['ignoreif'])) {
+				if($mod['ignoreif']->regex == 'true') {
+					if (preg_match($mod['ignoreif']->getContent(), $tmp)) {
+						continue;
+					}
+				} else {
+					if (strpos($tmp, $mod['ignoreif']->getContent()) !== false) {
+						continue;
+					}
+				}
+			}
+			
+			$searchContent = $mod['search']->getContent();
+			$addContent = $mod['add']->getContent();
+			$regex = ($mod['search']->regex == 'true');
+			$position = $mod['search']->position;
+			$modOffset = $mod['search']->offset;
+			
+			$indexCount = 0;
+			
+			$tmp = $this->_explodeData($tmp);
+			$lineMax = count($tmp) - 1;
+
+			switch($position) {
+				case 'top':
+				$tmp[$modOffset] =  $addContent . $tmp[$modOffset];
+				break;
+
+				case 'bottom':
+				$offset = $lineMax - $modOffset;
+				if($offset < 0){
+					$tmp[-1] = $addContent;
+				} else {
+					$tmp[$offset] .= $addContent;
+				}
+				break;
+
+				default:
+
+				$changed = false;
+				foreach($tmp as $lineNum => $line) {
+					if(strlen($searchContent) == 0) {
+						if($mod['error'] == 'log' || $mod['error'] == 'abort') {
+							VQMod::$log->write('VQModObject::applyMod - EMPTY SEARCH CONTENT ERROR', $this);
+						}
+						break;
+					}
+					
+					if(strlen($line) == 0) continue;
+					
+					$pos = VQModEngine::getMatch($line, $searchContent, $regex);
+					
+					if($pos === false) {
+						if($mod['error'] == 'log' || $mod['error'] == 'abort' ) {
+							VQMod::$log->write('VQModObject::applyMod - INVALID REGEX ERROR - ' . $searchContent, $this);
+						}
+						continue 2;
+					}
+
+					if($pos !== false) {
+						$indexCount++;
+						$changed = true;
+
+						if(!$mod['search']->indexes() || in_array($indexCount, $mod['search']->indexes())) {
+
+							switch($position) {
+								case 'before':
+									$offset = ($lineNum - $modOffset < 0) ? -1 : $lineNum - $modOffset;
+									$tmp[$offset] = empty($tmp[$offset]) ? $addContent : $addContent . "\n" . $tmp[$offset];
+									break;
+
+								case 'after':
+									$offset = ($lineNum + $modOffset > $lineMax) ? $lineMax : $lineNum + $modOffset;
+									$tmp[$offset] = $tmp[$offset] . "\n" . $addContent;
+									break;
+								
+								case 'ibefore':
+									$tmp[$lineNum] =  VQModEngine::textReplace($searchContent, $addContent . $searchContent, $line, false);
+									break;
+								
+								case 'iafter':
+									$tmp[$lineNum] =  VQModEngine::textReplace($searchContent, $searchContent . $addContent, $line, false);
+									break;
+
+								default:
+									if(!empty($modOffset)) {
+										for($i = 1; $i <= $modOffset; $i++) {
+											if(isset($tmp[$lineNum + $i])) {
+												$tmp[$lineNum + $i] = '';
+											}
+										}
+									}
+									
+									$tmp[$lineNum] = VQModEngine::textReplace($searchContent, $addContent, $line, $regex);
+									break;
+							}
+						}
+					}
+				}
+
+				if(!$changed) {
+					$skip = ($mod['error'] == 'skip' || $mod['error'] == 'log') ? ' (SKIPPED)' : ' (ABORTING MOD)';
+
+					if($mod['error'] == 'log' || $mod['error'] == 'abort') {
+						VQMod::$log->write('VQModObject::applyMod - SEARCH NOT FOUND' . $skip . ': ' . $searchContent, $this);
+					}
+
+					if($mod['error'] == 'abort') {
+						$this->_skip = true;
+						return;
+					}
+
+				}
+
+				break;
+			}
+			ksort($tmp);
+			$tmp = $this->_implodeData($tmp);
+		}
+		
+		VQMod::$fileModding = false;
+
+		$data = $tmp;
+	}
+
+	/**
+	 * VQModObject::_parseMods()
+	 *
+	 * @param DOMNode $node <modification> node to be parsed
+	 * @return null
+	 * @description Parses modifications in preparation for the applyMod method to work
+	 */
+	private function _parseMods(DOMNode $node){
+		$files = $node->getElementsByTagName('file');
+		
+		$replaces = VQMod::$_replaces;
+
+		foreach($files as $file) {
+			$path = $file->getAttribute('path') ? $file->getAttribute('path') : '';
+			$filesToMod = explode(',', $file->getAttribute('name'));
+			
+			foreach($filesToMod as $filename) {
+				
+				$fileToMod = $path . $filename;
+				if(!empty($replaces)) {
+					foreach($replaces as $r) {
+						if(count($r) == 2) {
+							$fileToMod = preg_replace($r[0], $r[1], $fileToMod);
+						}
+					}
+				}
+				
+				$error = ($file->hasAttribute('error')) ? $file->getAttribute('error') : 'log';
+				$fullPath = VQMod::path($fileToMod);
+	
+				if(!$fullPath || !file_exists($fullPath)){
+					if(strpos($fileToMod, '*') !== false) {
+						$fullPath = VQMod::getCwd() . $fileToMod;
+					} else {
+						if ($error == 'log' || $error == 'abort') {
+							$skip = ($error == 'log') ? ' (SKIPPED)' : ' (ABORTING MOD)';
+							VQMod::$log->write('VQModObject::parseMods - Could not resolve path for [' . $fileToMod . ']' . $skip, $this);
+						}
+	
+						if ($error == 'log' || $error == 'skip') {
+							continue;
+						} elseif ($error == 'abort') {
+							return false;
+						}
+					}
+				}
+	
+				$operations = $file->getElementsByTagName('operation');
+	
+				foreach($operations as $opIndex => $operation) {
+					$error = ($operation->hasAttribute('error')) ? $operation->getAttribute('error') : 'abort';
+					$ignoreif = $operation->getElementsByTagName('ignoreif')->item(0);
+					
+					if($ignoreif) {
+						$ignoreif = new VQSearchNode($ignoreif);
+					} else {
+						$ignoreif = false;
+					}
+					
+					
+					$this->mods[$fullPath][] = array(
+						'search' 		=> new VQSearchNode($operation->getElementsByTagName('search')->item(0)),
+						'add' 			=> new VQAddNode($operation->getElementsByTagName('add')->item(0)),
+						'ignoreif'		=> $ignoreif,
+						'error'		 	=> $error,
+						'fileToMod'		=> $fileToMod,
+						'opIndex'		=> $opIndex,
+					);
+				}
+			}
+		}
+	}
+
+	/**
+	 * VQModObject::_explodeData()
+	 *
+	 * @param string $data File contents
+	 * @return string
+	 * @description Splits a file into an array of individual lines
+	 */
+	private function _explodeData($data) {
+		return explode("\n", $data);
+	}
+
+	/**
+	 * VQModObject::_implodeData()
+	 *
+	 * @param array $data Array of lines
+	 * @return string
+	 * @description Joins an array of lines back into a text file
+	 */
+	private function _implodeData($data) {
+		return implode("\n", $data);
+	}
+}
+
+/**
  * VQModLog
  * @description Object to log information to a file
  */
@@ -508,305 +848,6 @@ class VQModLog {
 
 		$this->_logs[$hash]['log'][] = $data;
 
-	}
-}
-
-/**
- * VQModObject
- * @description Object for the <modification> that orchestrates each applied modification
- */
-class VQModObject {
-	public $modFile = '';
-	public $id = '';
-	public $version = '';
-	public $vqmver = '';
-	public $author = '';
-	public $mods = array();
-
-	private $_skip = false;
-
-	/**
-	 * VQModObject::__construct()
-	 *
-	 * @param DOMNode $node <modification> node
-	 * @param string $modFile File modification is from
-	 * @return null
-	 * @description Loads modification meta information
-	 */
-	public function __construct(DOMNode $node, $modFile) {
-		if($node->hasChildNodes()) {
-			foreach($node->childNodes as $child) {
-				$name = (string) $child->nodeName;
-				if(isset($this->$name)) {
-					$this->$name = (string) $child->nodeValue;
-				}
-			}
-		}
-
-		$this->modFile = $modFile;
-		$this->_parseMods($node);
-	}
-
-	/**
-	 * VQModObject::skip()
-	 *
-	 * @return bool
-	 * @description Returns the skip status of a modification
-	 */
-	public function skip() {
-		return $this->_skip;
-	}
-
-	/**
-	 * VQModObject::applyMod()
-	 *
-	 * @param array $mods Array of search add nodes
-	 * @param string $data File contents to be altered
-	 * @return null
-	 * @description Applies all modifications to the text data
-	 */
-	public function applyMod($mods, &$data) {
-		if($this->_skip) return;
-		$tmp = $data;
-
-		foreach($mods as $mod) {
-			VQMod::$fileModding = $mod['fileToMod'] . '(' . $mod['opIndex'] . ')';
-			if(!empty($mod['ignoreif'])) {
-				if($mod['ignoreif']->regex == 'true') {
-					if (preg_match($mod['ignoreif']->getContent(), $tmp)) {
-						continue;
-					}
-				} else {
-					if (strpos($tmp, $mod['ignoreif']->getContent()) !== false) {
-						continue;
-					}
-				}
-			}
-			
-			$searchContent = $mod['search']->getContent();
-			$addContent = $mod['add']->getContent();
-			
-			$indexCount = 0;
-			
-			$tmp = $this->_explodeData($tmp);
-			$lineMax = count($tmp) - 1;
-
-			switch($mod['search']->position) {
-				case 'top':
-				$tmp[$mod['search']->offset] =  $addContent . $tmp[$mod['search']->offset];
-				break;
-
-				case 'bottom':
-				$offset = $lineMax - $mod['search']->offset;
-				if($offset < 0){
-					$tmp[-1] = $addContent;
-				} else {
-					$tmp[$offset] .= $addContent;
-				}
-				break;
-
-				default:
-
-				$changed = false;
-				foreach($tmp as $lineNum => $line) {
-					if(strlen($searchContent) == 0) {
-						if($mod['error'] == 'log' || $mod['error'] == 'abort') {
-							VQMod::$log->write('VQModObject::applyMod - EMPTY SEARCH CONTENT ERROR', $this);
-						}
-						break;
-					}
-					
-					if($mod['search']->regex == 'true') {
-						$pos = @preg_match($searchContent, $line);
-						if($pos === false) {
-							if($mod['error'] == 'log' || $mod['error'] == 'abort' ) {
-								VQMod::$log->write('VQModObject::applyMod - INVALID REGEX ERROR - ' . $searchContent, $this);
-							}
-							continue 2;
-						} elseif($pos == 0) {
-							$pos = false;
-						}
-					} else {
-						$pos = strpos($line, $searchContent);
-					}
-
-					if($pos !== false) {
-						$indexCount++;
-						$changed = true;
-
-						if(!$mod['search']->indexes() || ($mod['search']->indexes() && in_array($indexCount, $mod['search']->indexes()))) {
-
-							switch($mod['search']->position) {
-								case 'before':
-								$offset = ($lineNum - $mod['search']->offset < 0) ? -1 : $lineNum - $mod['search']->offset;
-								$tmp[$offset] = empty($tmp[$offset]) ? $addContent : $addContent . "\n" . $tmp[$offset];
-								break;
-
-								case 'after':
-								$offset = ($lineNum + $mod['search']->offset > $lineMax) ? $lineMax : $lineNum + $mod['search']->offset;
-								$tmp[$offset] = $tmp[$offset] . "\n" . $addContent;
-								break;
-								
-								case 'ibefore':
-								$tmp[$lineNum] = $this->_textReplace($searchContent, $addContent . $searchContent, $line);
-								break;
-								
-								case 'iafter':
-								$tmp[$lineNum] = $this->_textReplace($searchContent, $searchContent . $addContent, $line);
-								break;
-
-								default:
-								if(!empty($mod['search']->offset)) {
-									for($i = 1; $i <= $mod['search']->offset; $i++) {
-										if(isset($tmp[$lineNum + $i])) {
-											$tmp[$lineNum + $i] = '';
-										}
-									}
-								}
-								
-								$tmp[$lineNum] = $this->_textReplace($searchContent, $addContent, $line, $mod['search']->regex);
-								break;
-							}
-						}
-					}
-				}
-
-				if(!$changed) {
-					$skip = ($mod['error'] == 'skip' || $mod['error'] == 'log') ? ' (SKIPPED)' : ' (ABORTING MOD)';
-
-					if($mod['error'] == 'log' || $mod['error'] == 'abort') {
-						VQMod::$log->write('VQModObject::applyMod - SEARCH NOT FOUND' . $skip . ': ' . $searchContent, $this);
-					}
-
-					if($mod['error'] == 'abort') {
-						$this->_skip = true;
-						return;
-					}
-
-				}
-
-				break;
-			}
-			ksort($tmp);
-			$tmp = $this->_implodeData($tmp);
-		}
-		
-		VQMod::$fileModding = false;
-
-		$data = $tmp;
-	}
-
-	/**
-	 * VQModObject::_textReplace()
-	 *
-	 * @param string $search text to find
-	 * @param string $add text to add
-	 * @param string $content text to perform modification to
-	 * @param bool $regex regex replace
-	 * @return string
-	 * @description 
-	 */
-	private function _textReplace($search, $replace, $content, $regex = false){
-		if($regex) {
-			return preg_replace($search, $replace, $content);
-		} else {
-			return str_replace($search, $replace, $content);
-		}
-	}
-
-	/**
-	 * VQModObject::_parseMods()
-	 *
-	 * @param DOMNode $node <modification> node to be parsed
-	 * @return null
-	 * @description Parses modifications in preparation for the applyMod method to work
-	 */
-	private function _parseMods(DOMNode $node){
-		$files = $node->getElementsByTagName('file');
-		
-		$replaces = VQMod::$_replaces;
-
-		foreach($files as $file) {
-			$path = $file->getAttribute('path') ? $file->getAttribute('path') : '';
-			$filesToMod = explode(',', $file->getAttribute('name'));
-			
-			foreach($filesToMod as $filename) {
-				
-				$fileToMod = $path . $filename;
-				if(!empty($replaces)) {
-					foreach($replaces as $r) {
-						if(count($r) == 2) {
-							$fileToMod = preg_replace($r[0], $r[1], $fileToMod);
-						}
-					}
-				}
-				
-				$error = ($file->hasAttribute('error')) ? $file->getAttribute('error') : 'log';
-				$fullPath = VQMod::path($fileToMod);
-	
-				if(!$fullPath || !file_exists($fullPath)){
-					if(strpos($fileToMod, '*') !== false) {
-						$fullPath = VQMod::getCwd() . $fileToMod;
-					} else {
-						if ($error == 'log' || $error == 'abort') {
-							$skip = ($error == 'log') ? ' (SKIPPED)' : ' (ABORTING MOD)';
-							VQMod::$log->write('VQModObject::parseMods - Could not resolve path for [' . $fileToMod . ']' . $skip, $this);
-						}
-	
-						if ($error == 'log' || $error == 'skip') {
-							continue;
-						} elseif ($error == 'abort') {
-							return false;
-						}
-					}
-				}
-	
-				$operations = $file->getElementsByTagName('operation');
-	
-				foreach($operations as $opIndex => $operation) {
-					$error = ($operation->hasAttribute('error')) ? $operation->getAttribute('error') : 'abort';
-					$ignoreif = $operation->getElementsByTagName('ignoreif')->item(0);
-					
-					if($ignoreif) {
-						$ignoreif = new VQSearchNode($ignoreif);
-					} else {
-						$ignoreif = false;
-					}
-					
-					
-					$this->mods[$fullPath][] = array(
-						'search' 		=> new VQSearchNode($operation->getElementsByTagName('search')->item(0)),
-						'add' 			=> new VQAddNode($operation->getElementsByTagName('add')->item(0)),
-						'ignoreif'		=> $ignoreif,
-						'error'		 	=> $error,
-						'fileToMod'		=> $fileToMod,
-						'opIndex'		=> $opIndex,
-					);
-				}
-			}
-		}
-	}
-
-	/**
-	 * VQModObject::_explodeData()
-	 *
-	 * @param string $data File contents
-	 * @return string
-	 * @description Splits a file into an array of individual lines
-	 */
-	private function _explodeData($data) {
-		return explode("\n", $data);
-	}
-
-	/**
-	 * VQModObject::_implodeData()
-	 *
-	 * @param array $data Array of lines
-	 * @return string
-	 * @description Joins an array of lines back into a text file
-	 */
-	private function _implodeData($data) {
-		return implode("\n", $data);
 	}
 }
 
