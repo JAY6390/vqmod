@@ -193,6 +193,27 @@ abstract class VQMod {
 	}
 
 	/**
+	 * VQMod::getDevMode()
+	 *
+	 * @return string
+	 * @description Returns current Developer Mode
+	 */
+	public static function getDevMode() {
+		return self::$_devMode;
+	}
+
+	/**
+	 * VQMod::setDevMode()
+	 *
+	 * @param bool $enabled
+	 * @return string
+	 * @description Returns current Developer Mode
+	 */
+	public static function setDevMode($enabled) {
+		self::$_devMode = (bool) $enabled;
+	}
+
+	/**
 	 * VQMod::_getMods()
 	 *
 	 * @return null
