@@ -583,6 +583,9 @@ class VQModObject {
 				}
 			}
 			
+			$searchContent = $mod['search']->getContent();
+			$addContent = $mod['add']->getContent();
+			
 			$indexCount = 0;
 			
 			$tmp = $this->_explodeData($tmp);
@@ -590,15 +593,15 @@ class VQModObject {
 
 			switch($mod['search']->position) {
 				case 'top':
-				$tmp[$mod['search']->offset] =  $mod['add']->getContent() . $tmp[$mod['search']->offset];
+				$tmp[$mod['search']->offset] =  $addContent . $tmp[$mod['search']->offset];
 				break;
 
 				case 'bottom':
 				$offset = $lineMax - $mod['search']->offset;
 				if($offset < 0){
-					$tmp[-1] = $mod['add']->getContent();
+					$tmp[-1] = $addContent;
 				} else {
-					$tmp[$offset] .= $mod['add']->getContent();
+					$tmp[$offset] .= $addContent;
 				}
 				break;
 
@@ -606,7 +609,7 @@ class VQModObject {
 
 				$changed = false;
 				foreach($tmp as $lineNum => $line) {
-					if(strlen($mod['search']->getContent()) == 0) {
+					if(strlen($searchContent) == 0) {
 						if($mod['error'] == 'log' || $mod['error'] == 'abort') {
 							VQMod::$log->write('VQModObject::applyMod - EMPTY SEARCH CONTENT ERROR', $this);
 						}
@@ -614,17 +617,17 @@ class VQModObject {
 					}
 					
 					if($mod['search']->regex == 'true') {
-						$pos = @preg_match($mod['search']->getContent(), $line);
+						$pos = @preg_match($searchContent, $line);
 						if($pos === false) {
 							if($mod['error'] == 'log' || $mod['error'] == 'abort' ) {
-								VQMod::$log->write('VQModObject::applyMod - INVALID REGEX ERROR - ' . $mod['search']->getContent(), $this);
+								VQMod::$log->write('VQModObject::applyMod - INVALID REGEX ERROR - ' . $searchContent, $this);
 							}
 							continue 2;
 						} elseif($pos == 0) {
 							$pos = false;
 						}
 					} else {
-						$pos = strpos($line, $mod['search']->getContent());
+						$pos = strpos($line, $searchContent);
 					}
 
 					if($pos !== false) {
@@ -636,20 +639,20 @@ class VQModObject {
 							switch($mod['search']->position) {
 								case 'before':
 								$offset = ($lineNum - $mod['search']->offset < 0) ? -1 : $lineNum - $mod['search']->offset;
-								$tmp[$offset] = empty($tmp[$offset]) ? $mod['add']->getContent() : $mod['add']->getContent() . "\n" . $tmp[$offset];
+								$tmp[$offset] = empty($tmp[$offset]) ? $addContent : $addContent . "\n" . $tmp[$offset];
 								break;
 
 								case 'after':
 								$offset = ($lineNum + $mod['search']->offset > $lineMax) ? $lineMax : $lineNum + $mod['search']->offset;
-								$tmp[$offset] = $tmp[$offset] . "\n" . $mod['add']->getContent();
+								$tmp[$offset] = $tmp[$offset] . "\n" . $addContent;
 								break;
 								
 								case 'ibefore':
-								$tmp[$lineNum] = str_replace($mod['search']->getContent(), $mod['add']->getContent() . $mod['search']->getContent(), $line);
+								$tmp[$lineNum] = $this->_textReplace($searchContent, $addContent . $searchContent, $line);
 								break;
 								
 								case 'iafter':
-								$tmp[$lineNum] = str_replace($mod['search']->getContent(), $mod['search']->getContent() . $mod['add']->getContent(), $line);
+								$tmp[$lineNum] = $this->_textReplace($searchContent, $searchContent . $addContent, $line);
 								break;
 
 								default:
@@ -661,7 +664,7 @@ class VQModObject {
 									}
 								}
 								
-								$tmp[$lineNum] = $this->_textReplace($mod['search']->getContent(), $mod['add']->getContent(), $line, $mod['search']->regex);
+								$tmp[$lineNum] = $this->_textReplace($searchContent, $addContent, $line, $mod['search']->regex);
 								break;
 							}
 						}
@@ -672,7 +675,7 @@ class VQModObject {
 					$skip = ($mod['error'] == 'skip' || $mod['error'] == 'log') ? ' (SKIPPED)' : ' (ABORTING MOD)';
 
 					if($mod['error'] == 'log' || $mod['error'] == 'abort') {
-						VQMod::$log->write('VQModObject::applyMod - SEARCH NOT FOUND' . $skip . ': ' . $mod['search']->getContent(), $this);
+						VQMod::$log->write('VQModObject::applyMod - SEARCH NOT FOUND' . $skip . ': ' . $searchContent, $this);
 					}
 
 					if($mod['error'] == 'abort') {
